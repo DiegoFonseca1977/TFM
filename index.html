@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador de Rutas por Tráfico</title>
+    <style>
+        body {
+            font-family: Candara, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        h2 {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 2em;
+        }
+        #controls {
+            margin: 20px;
+            display: flex;
+            flex-direction: row;
+            gap: 10px;
+            justify-content: center;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 1em;
+        }
+        #map {
+            height: 500px;
+            width: 100%;
+            margin: 20px 0;
+        }
+        #output {
+            margin: 20px;
+            text-align: center;
+        }
+        table {
+            margin: 0 auto;
+            border-collapse: collapse;
+            width: 80%;
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+            font-size: 1em;
+        }
+        .best-route {
+            background-color: #00FF00; /* Color verde para la mejor ruta */
+            font-weight: bold;
+        }
+        .route-color-1 {
+            background-color: #09c70c; /* Color de fondo para la ruta 1 */
+        }
+        .route-color-2 {
+            background-color: #FFFF00; /* Color de fondo para la ruta 2 */
+        }
+        .route-color-3 {
+            background-color: #FF0000; /* Color de fondo para la ruta 3 */
+        }
+        .star {
+            color: gold;
+        }
+        #footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #8b9e9b;
+        }
+        /* Gráfico */
+        #charts {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px;
+        }
+        canvas {
+            max-width: 400px;
+            width: 100%;
+            height: 300px;
+        }
+        @media (max-width: 768px) {
+            #map {
+                height: 300px;
+            }
+            #controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            input, button {
+                width: 90%;
+                max-width: 400px;
+            }
+            table {
+                width: 100%;
+            }
+            #charts {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h2>Visualizador de Rutas por tráfico, consumo de Combustible y Emisión de CO2</h2>
+    <div id="controls">
+        <input type="text" id="start" placeholder="Dirección de Inicio">
+        <input type="text" id="end" placeholder="Dirección de Destino">
+        <button onclick="calculateRoutes()">Calcular Rutas</button>
+    </div>
+    <div id="map"></div>
+    <div id="charts">
+        <canvas id="distanceChart"></canvas>
+        <canvas id="consumptionChart"></canvas>
+    </div>
+    <div id="output">
+        <table id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Ruta</th>
+                    <th>Distancia</th>
+                    <th>Duración</th>
+                    <th>Consumo de Combustible (gal)</th>
+                    <th>Emisión de CO2 (kg)</th>
+                    <th>Mejor Ruta</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Las filas se agregarán dinámicamente aquí -->
+            </tbody>
+        </table>
+    </div>
+    <div id="footer">
+        <p>Trabajo final de máster desarrollado por: Ing. Diego A. Fonseca Tarquino</p>
+    </div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDqO2jwmUfd8SLyp4rwwvErVaUicd_efQs&libraries=places"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let map, directionsService;
+        let routeRenderers = [];
+        const routeColors = ['#09c70c', '#FFFF00', '#FF0000']; // Colores para rutas
+        const bestRouteColor = '#00FF00'; // Color verde para la mejor ruta
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: { lat: 4.7110, lng: -74.0721 },
+                zoom: 7
+            });
+            directionsService = new google.maps.DirectionsService();
+        }
+
+        function calculateRoutes() {
+            const start = document.getElementById("start").value.trim();
+            const end = document.getElementById("end").value.trim();
+
+            if (!start || !end) {
+                alert("Por favor ingrese tanto la dirección de inicio como la dirección de destino.");
+                return;
+            }
+
+            const request = {
+                origin: start,
+                destination: end,
+                travelMode: 'DRIVING',
+                provideRouteAlternatives: true
+            };
+
+            directionsService.route(request, (result, status) => {
+                if (status === 'OK') {
+                    clearMap();
+                    routeRenderers = [];
+                    const routes = result.routes;
+                    const routeDetails = [];
+
+                    routes.forEach((route, index) => {
+                        const colorIndex = index % routeColors.length;
+                        const renderer = new google.maps.DirectionsRenderer({
+                            map: map,
+                            directions: result,
+                            routeIndex: index,
+                            polylineOptions: {
+                                strokeColor: routeColors[colorIndex],
+                                strokeWeight: 5
+                            }
+                        });
+                        routeRenderers.push(renderer);
+
+                        const distance = route.legs[0].distance.value;
+                        const duration = route.legs[0].duration.value;
+                        const fuelConsumption = calculateFuelConsumption(distance);
+                        const co2Emission = calculateCO2Emission(fuelConsumption);
+
+                        routeDetails.push({
+                            index,
+                            distance: route.legs[0].distance.text,
+                            duration: route.legs[0].duration.text,
+                            fuelConsumption: fuelConsumption.toFixed(2),
+                            co2Emission: co2Emission.toFixed(2),
+                            distanceValue: distance,
+                            durationValue: duration,
+                            fuelConsumptionValue: fuelConsumption,
+                            co2EmissionValue: co2Emission,
+                            colorClass: `route-color-${index + 1}`
+                        });
+                    });
+
+                    const bestRouteDetails = getBestRouteDetails(routeDetails);
+                    displayRouteInfo(routeDetails, bestRouteDetails);
+                    highlightBestRoute(bestRouteDetails);
+                    updateCharts(routeDetails);
+                } else {
+                    alert('No se pudo calcular las rutas: ' + status);
+                }
+            });
+        }
+
+        function clearMap() {
+            routeRenderers.forEach(renderer => renderer.setMap(null));
+            routeRenderers = [];
+        }
+
+        function displayRouteInfo(routeDetails, bestRouteDetails) {
+            const tableBody = document.querySelector("#resultsTable tbody");
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            routeDetails.forEach((details, index) => {
+                const row = tableBody.insertRow();
+                row.className = details.index === bestRouteDetails.index ? 'best-route' : details.colorClass;
+                row.insertCell().textContent = `Ruta ${index + 1}`;
+                row.insertCell().textContent = details.distance;
+                row.insertCell().textContent = details.duration;
+                row.insertCell().textContent = details.fuelConsumption;
+                row.insertCell().textContent = details.co2Emission;
+                row.insertCell().innerHTML = details.index === bestRouteDetails.index ? '<span class="star">★</span>' : '';
+            });
+        }
+
+        function highlightBestRoute(bestRouteDetails) {
+            routeRenderers.forEach((renderer, index) => {
+                if (index === bestRouteDetails.index) {
+                    renderer.setOptions({ polylineOptions: { strokeColor: bestRouteColor, strokeWeight: 10 } });
+                }
+            });
+        }
+
+        function getBestRouteDetails(routeDetails) {
+            const bestByDuration = routeDetails.reduce((prev, curr) => prev.durationValue < curr.durationValue ? prev : curr);
+            return bestByDuration;
+        }
+
+        function calculateFuelConsumption(distanceInMeters) {
+            const distanceInKm = distanceInMeters / 1000;
+            const fuelEfficiency = 40; // km por galón
+            return distanceInKm / fuelEfficiency;
+        }
+
+        function calculateCO2Emission(fuelConsumption) {
+            const co2PerGallon = 8.89; // kg de CO2 por galón de gasolina
+            return fuelConsumption * co2PerGallon;
+        }
+
+        function updateCharts(routeDetails) {
+            const ctxDistance = document.getElementById('distanceChart').getContext('2d');
+            const ctxConsumption = document.getElementById('consumptionChart').getContext('2d');
+
+            new Chart(ctxDistance, {
+                type: 'bar',
+                data: {
+                    labels: routeDetails.map((_, index) => `Ruta ${index + 1}`),
+                    datasets: [{
+                        label: 'Distancia (km)',
+                        data: routeDetails.map(detail => detail.distanceValue / 1000),
+                        backgroundColor: routeDetails.map((_, index) => routeColors[index % routeColors.length]),
+                        borderColor: '#000',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // Cambia a horizontal
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Distancia (km)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Ruta'
+                            }
+                        }
+                    }
+                }
+            });
+
+            new Chart(ctxConsumption, {
+                type: 'bar',
+                data: {
+                    labels: routeDetails.map((_, index) => `Ruta ${index + 1}`),
+                    datasets: [{
+                        label: 'Consumo de Combustible (gal)',
+                        data: routeDetails.map(detail => detail.fuelConsumptionValue),
+                        backgroundColor: routeDetails.map((_, index) => routeColors[index % routeColors.length]),
+                        borderColor: '#000',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // Cambia a horizontal
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Consumo de Combustible (gal)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Ruta'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
